@@ -1,0 +1,8 @@
+*.o
+*.a
+*.swo
+*.swp
+*~
+atm_bench
+atm_ft_bench
+test_render
