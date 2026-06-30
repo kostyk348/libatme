@@ -75,13 +75,14 @@ int atm_bench_make_test_glyph(atm_glyph_outline_t *outline,
 }
 
 /* ─── Benchmark single glyph render ─── */
-static void bench_rasterize(atm_engine_t *engine, int iterations,
-                            const char *label) {
+static void bench_rasterize(int iterations, const char *label,
+                            int ss_level) {
     atm_glyph_outline_t outline;
     if (atm_bench_make_test_glyph(&outline, "A") < 0) return;
 
-    atm_fixed_t size = ATM_INT_TO_FIXED(48);
-    atm_raster_config_t rcfg = { .ss_level = 2, .flip_y = 1 };
+    atm_fixed_t scale = ATM_FIXED_DIV(ATM_INT_TO_FIXED(48), ATM_INT_TO_FIXED(1000));
+    atm_outline_scale(&outline, scale);
+    atm_raster_config_t rcfg = { .ss_level = ss_level, .flip_y = 1 };
     atm_glyph_bitmap_t bitmap;
 
     double t0 = now_ms();
@@ -109,6 +110,8 @@ static void bench_aa_levels(void) {
     for (int ss = 1; ss <= 4; ss *= 2) {
         atm_glyph_outline_t outline;
         atm_bench_make_test_glyph(&outline, "A");
+        atm_fixed_t scale = ATM_FIXED_DIV(ATM_INT_TO_FIXED(48), ATM_INT_TO_FIXED(1000));
+        atm_outline_scale(&outline, scale);
         atm_raster_config_t rcfg = { .ss_level = ss, .flip_y = 1 };
         atm_glyph_bitmap_t bitmap;
 
@@ -149,6 +152,7 @@ static void bench_cache(void) {
            t1 - t0, cache.hits, cache.misses);
 
     /* Second pass: all hits */
+    cache.hits = 0; cache.misses = 0;
     t0 = now_ms();
     for (int i = 0; i < 1000; i++) {
         atm_cache_lookup(&cache, 1, i, ATM_INT_TO_FIXED(12));
@@ -156,7 +160,7 @@ static void bench_cache(void) {
     t1 = now_ms();
 
     printf("  Second pass (hot): %8.1f ms  hits=%d misses=%d  rate=%d%%\n",
-           t1 - t0, cache.hits - 1000, cache.misses,
+           t1 - t0, cache.hits, cache.misses,
            atm_cache_hit_rate(&cache));
 
     atm_bitmap_free(&bm);
@@ -284,7 +288,7 @@ void atm_run_benchmarks(int iterations) {
     };
     atm_engine_t engine;
     atm_engine_init(&engine, &config_aa);
-    bench_rasterize(&engine, iterations, "AA 2x2 (ATM default)");
+    bench_rasterize(iterations, "AA 2x2 (ATM default)", 2);
     atm_engine_shutdown(&engine);
 
     atm_config_t config_aa4 = {
@@ -292,7 +296,7 @@ void atm_run_benchmarks(int iterations) {
         .antialias_level = 4,
     };
     atm_engine_init(&engine, &config_aa4);
-    bench_rasterize(&engine, iterations, "AA 4x4 (high quality)");
+    bench_rasterize(iterations, "AA 4x4 (high quality)", 4);
     atm_engine_shutdown(&engine);
 
     /* Anti-aliasing level comparison */

@@ -64,51 +64,94 @@ static double compute_psnr(const uint8_t *a, const uint8_t *b,
         : 10.0 * log10(255.0*255.0 / (mse/count));
 }
 
-/* ─── Outline conversion helpers (now direct: no decomposition needed) ─── */
+/* ─── Outline conversion via FT_Outline_Decompose (proper cubic bezier) ─── */
 
-/* ─── Build an atm_glyph_outline_t from an FT_Outline ─── */
+struct atm_outline_builder {
+    atm_glyph_outline_t *dst;
+    atm_fixed_t first_x, first_y;
+};
+
+static int atm_ensure_capacity(atm_glyph_outline_t *dst) {
+    if (dst->num_elements < dst->capacity) return 0;
+    dst->capacity += 256;
+    atm_path_elem_t *p = realloc(dst->elements,
+                                 dst->capacity * sizeof(atm_path_elem_t));
+    if (!p) return -1;
+    dst->elements = p;
+    return 0;
+}
+
+static int atm_move_to(const FT_Vector *to, void *user) {
+    struct atm_outline_builder *b = user;
+    if (atm_ensure_capacity(b->dst)) return -1;
+    int i = b->dst->num_elements++;
+    b->dst->elements[i].cmd = ATM_MOVETO;
+    b->dst->elements[i].x = ATM_INT_TO_FIXED(to->x) / 64;
+    b->dst->elements[i].y = ATM_INT_TO_FIXED(to->y) / 64;
+    b->first_x = b->dst->elements[i].x;
+    b->first_y = b->dst->elements[i].y;
+    return 0;
+}
+
+static int atm_line_to(const FT_Vector *to, void *user) {
+    struct atm_outline_builder *b = user;
+    if (atm_ensure_capacity(b->dst)) return -1;
+    int i = b->dst->num_elements++;
+    b->dst->elements[i].cmd = ATM_LINETO;
+    b->dst->elements[i].x = ATM_INT_TO_FIXED(to->x) / 64;
+    b->dst->elements[i].y = ATM_INT_TO_FIXED(to->y) / 64;
+    return 0;
+}
+
+static int atm_conic_to(const FT_Vector *control, const FT_Vector *to,
+                        void *user) {
+    (void)control;
+    struct atm_outline_builder *b = user;
+    if (atm_ensure_capacity(b->dst)) return -1;
+    int i = b->dst->num_elements++;
+    b->dst->elements[i].cmd = ATM_LINETO;
+    b->dst->elements[i].x = ATM_INT_TO_FIXED(to->x) / 64;
+    b->dst->elements[i].y = ATM_INT_TO_FIXED(to->y) / 64;
+    return 0;
+}
+
+static int atm_cubic_to(const FT_Vector *c1, const FT_Vector *c2,
+                        const FT_Vector *to, void *user) {
+    struct atm_outline_builder *b = user;
+    if (atm_ensure_capacity(b->dst)) return -1;
+    int i = b->dst->num_elements++;
+    b->dst->elements[i].cmd = ATM_CURVETO;
+    b->dst->elements[i].cx1 = ATM_INT_TO_FIXED(c1->x) / 64;
+    b->dst->elements[i].cy1 = ATM_INT_TO_FIXED(c1->y) / 64;
+    b->dst->elements[i].cx2 = ATM_INT_TO_FIXED(c2->x) / 64;
+    b->dst->elements[i].cy2 = ATM_INT_TO_FIXED(c2->y) / 64;
+    b->dst->elements[i].x = ATM_INT_TO_FIXED(to->x) / 64;
+    b->dst->elements[i].y = ATM_INT_TO_FIXED(to->y) / 64;
+    return 0;
+}
+
 static int ftoutline_to_atmoutline(FT_Outline *src, atm_glyph_outline_t *dst) {
     if (!src) return -1;
 
-    int alloc = 512;
-    dst->elements = malloc(alloc * sizeof(atm_path_elem_t));
-    if (!dst->elements) return -1;
-    dst->capacity = alloc;
+    dst->elements = NULL;
+    dst->capacity = 0;
     dst->num_elements = 0;
 
-    int cs = 0;
-    for (int c = 0; c < src->n_contours; c++) {
-        int ce = src->contours[c];
-        int n = ce - cs + 1;
+    struct atm_outline_builder builder;
+    builder.dst = dst;
 
-        for (int i = 0; i < n; i++) {
-            int idx = cs + i;
-            char tag = src->tags[idx];
-            FT_Vector v = src->points[idx];
-            atm_fixed_t fx = ATM_INT_TO_FIXED(v.x) / 64;
-            atm_fixed_t fy = ATM_INT_TO_FIXED(v.y) / 64;
+    FT_Outline_Funcs funcs;
+    funcs.move_to = atm_move_to;
+    funcs.line_to = atm_line_to;
+    funcs.conic_to = atm_conic_to;
+    funcs.cubic_to = atm_cubic_to;
+    funcs.shift = 0;
+    funcs.delta = 0;
 
-            if (dst->num_elements + 1 > dst->capacity) {
-                dst->capacity += 256;
-                dst->elements = realloc(dst->elements,
-                    dst->capacity * sizeof(atm_path_elem_t));
-                if (!dst->elements) return -1;
-            }
-
-            if (i == 0 || (tag & 1)) {
-                dst->elements[dst->num_elements].cmd =
-                    (i == 0) ? ATM_MOVETO : ATM_LINETO;
-                dst->elements[dst->num_elements].x = fx;
-                dst->elements[dst->num_elements].y = fy;
-                dst->num_elements++;
-            } else {
-                dst->elements[dst->num_elements].cmd = ATM_LINETO;
-                dst->elements[dst->num_elements].x = fx;
-                dst->elements[dst->num_elements].y = fy;
-                dst->num_elements++;
-            }
-        }
-        cs = ce + 1;
+    if (FT_Outline_Decompose(src, &funcs, &builder)) {
+        free(dst->elements);
+        dst->elements = NULL;
+        return -1;
     }
 
     FT_BBox bb;
@@ -117,6 +160,13 @@ static int ftoutline_to_atmoutline(FT_Outline *src, atm_glyph_outline_t *dst) {
     dst->bbox.yMin = ATM_INT_TO_FIXED(bb.yMin) / 64;
     dst->bbox.xMax = ATM_INT_TO_FIXED(bb.xMax) / 64;
     dst->bbox.yMax = ATM_INT_TO_FIXED(bb.yMax) / 64;
+
+    /* shrink capacity to fit (no-op if realloc fails) */
+    if (dst->num_elements > 0) {
+        atm_path_elem_t *p = realloc(dst->elements,
+            dst->num_elements * sizeof(atm_path_elem_t));
+        if (p) dst->elements = p, dst->capacity = dst->num_elements;
+    }
     return 0;
 }
 
@@ -256,11 +306,6 @@ static void bench_quality(FT_Library ft) {
         atm_glyph_outline_t outline;
         memset(&outline, 0, sizeof(outline));
         if (ftoutline_to_atmoutline(&face->glyph->outline, &outline)) continue;
-
-        /* Scale to target size */
-        atm_fixed_t scale = ATM_FIXED_DIV(ATM_INT_TO_FIXED(sizes[si]),
-                                          ATM_INT_TO_FIXED(48));
-        atm_outline_scale(&outline, scale);
 
         /* Render with ATM AA 2x2 */
         atm_raster_config_t rcfg = { .ss_level = 2, .flip_y = 1 };
