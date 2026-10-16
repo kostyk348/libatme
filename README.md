@@ -3,6 +3,9 @@
 [![CI](https://github.com/kostyk348/libatme/actions/workflows/ci.yml/badge.svg)](https://github.com/kostyk348/libatme/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![C](https://img.shields.io/badge/C-99-blue.svg)](https://en.wikipedia.org/wiki/C_(programming_language))
+[![Release](https://img.shields.io/github/v/release/kostyk348/libatme?sort=semver&color=blue)](https://github.com/kostyk348/libatme/releases)
+[![License](https://img.shields.io/badge/license-MIT-green)](https://github.com/kostyk348/libatme/blob/master/LICENSE)
+[![Last commit](https://img.shields.io/github/last-commit/kostyk348/libatme?branch=master)](https://github.com/kostyk348/libatme/commits/master)
 
 Pure-C, zero-dependency Type 1 / PFB font renderer ported from the algorithms
 behind Adobe Type Manager (ATM) Deluxe 4.1.
