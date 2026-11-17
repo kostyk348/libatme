@@ -20,3 +20,15 @@ jobs:
         with:
           name: libatme.a
           path: libatme.a
+
+  cmake-tests:
+    name: Raster tests (cmake + ctest, no font file needed)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Tests
+        run: ctest --test-dir build --output-on-failure

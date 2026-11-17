@@ -2,9 +2,17 @@
 #include <stdio.h>
 #include <string.h>
 
-#define FONT_DIR "/home/lain/Downloads/atm_deluxe/Adobe Type Manager Deluxe 4.1/Adobe Type Manager Deluxe v.4.1/fonts"
+/* Путь к .pfb больше не прибит к машине автора: аргумент командной строки,
+   переменная LIBATME_PFB или пропуск теста (шрифта в репозитории нет). */
+#include <stdlib.h>
 
-int main(void) {
+int main(int argc, char **argv) {
+    const char *font_path = (argc > 1) ? argv[1] : getenv("LIBATME_PFB");
+    if (!font_path || !*font_path) {
+        printf("test_render: путь к .pfb не задан (аргумент или LIBATME_PFB) — пропуск\n");
+        return 0;
+    }
+
     atm_engine_t engine;
     atm_config_t config = {
         .flags = ATM_FLAG_ANTIALIAS | ATM_FLAG_CACHE_ENABLED,
@@ -15,7 +23,7 @@ int main(void) {
     atm_engine_init(&engine, &config);
 
     char path[512];
-    snprintf(path, sizeof(path), "%s/%s", FONT_DIR, "qg______.pfb");
+    snprintf(path, sizeof(path), "%s", font_path);
 
     int fid = atm_engine_load_font(&engine, path, NULL);
     if (fid < 0) {

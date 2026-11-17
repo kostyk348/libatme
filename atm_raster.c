@@ -276,6 +276,14 @@ int atm_rasterize(const atm_glyph_outline_t *outline,
     uint8_t *scan_buf = malloc(ss_w + 8);
     if (!scan_buf) { free(active); free(eall); free(buckets); free(pts); atm_bitmap_free(&result); return -1; }
 
+    /* Накопитель покрытия (16 бит на пиксель): нужен для честного AA — за ss² подвыборок
+       на пиксель uint8_t переполнялся. При ss==1 не используется. */
+    uint16_t *acc = NULL;
+    if (ss > 1) {
+        acc = (uint16_t *)calloc((size_t)width * (size_t)height, sizeof(uint16_t));
+        if (!acc) { free(scan_buf); free(active); free(eall); free(buckets); free(pts); atm_bitmap_free(&result); return -1; }
+    }
+
     for (int y = 0; y < ss_h; y++) {
         /* Remove edges that end at this scanline */
         int wi = 0;
@@ -329,28 +337,31 @@ int atm_rasterize(const atm_glyph_outline_t *outline,
             memcpy(dst_row + (y - dst_y * ss) * result.pitch + 0,
                    scan_buf, width);
         } else {
+            /* Накопление в 16-битном буфере: на пиксель приходится до ss*ss
+               попаданий, в uint8_t это переполнялось (и AA уходил в ~1/ss² от нормы). */
             for (int x = 0; x < width; x++) {
-                int sum = 0;
+                int hits = 0;
                 for (int sx = 0; sx < ss; sx++) {
                     int ss_x = x * ss + sx;
-                    sum += scan_buf[ss_x];
+                    if (scan_buf[ss_x]) hits++;
                 }
-                int idx = dst_y * result.pitch + x;
-                result.buf[idx] += (uint8_t)(sum / ss);
+                acc[dst_y * width + x] = (uint16_t)(acc[dst_y * width + x] + hits);
             }
         }
     }
 
-    /* Normalize supersample buffer (divide by ss for each sub-sample) */
+    /* Normalize supersample buffer: alpha = hits * 255 / ss² */
     if (ss > 1) {
         int ss2 = ss * ss;
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 int idx = y * result.pitch + x;
-                int val = result.buf[idx];
-                result.buf[idx] = (uint8_t)((val * 255 + ss2 / 2) / (255 * ss2));
+                int hits = acc[y * width + x];
+                result.buf[idx] = (uint8_t)((hits * 255 + ss2 / 2) / ss2);
             }
         }
+        free(acc);
+        acc = NULL;
     }
 
     /* Metrics */
